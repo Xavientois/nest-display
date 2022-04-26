@@ -1,8 +1,8 @@
 use std::sync::mpsc;
 
-use embedded_hal::blocking::delay::DelayMs;
-use log::error;
-use rppal_dht11::Measurement;
+use embedded_hal::blocking::delay::{DelayMs, DelayUs};
+use log::{error, info, trace};
+use rppal_dht11::Dht11;
 
 /// Communicate with the DHT11 device over the provided GPIO/BCM pin
 pub mod dht11;
@@ -14,9 +14,9 @@ pub use crate::lcd::TwoStringPrint;
 /// Communicate with remote Nest device
 pub mod nest;
 
-const DEGREE_SYM: &str = unsafe { std::str::from_utf8_unchecked(b"\xDF") };
+/// Display formatting helpers
+mod format;
 
-// Thread functions
 pub enum DisplayUpdate {
     First(String),
     Second(String),
@@ -39,11 +39,16 @@ where
     }
 }
 pub fn run_nest<D: DelayMs<u16>>(tx: mpsc::Sender<DisplayUpdate>, mut delay: D) {
+    let nest = nest::Client::new();
     loop {
-        let nest = nest::Client::new();
+        trace!("Requesting Nest data");
         let nest_data = nest.get_data();
         if let Ok(data) = nest_data {
-            let _ = tx.send(DisplayUpdate::Second(format_nest_data(&data)));
+            let result = tx.send(DisplayUpdate::Second(format::nest_data(&data)));
+            // Kill thread when receiver disconnects
+            if result.is_err() {
+                break;
+            }
         } else {
             error!("{}", nest_data.unwrap_err());
         }
@@ -52,37 +57,24 @@ pub fn run_nest<D: DelayMs<u16>>(tx: mpsc::Sender<DisplayUpdate>, mut delay: D) 
     }
 }
 
-// Output Formatting Functions
-pub fn format_measurement(m: &Measurement) -> String {
-    const DEGREE_SYM: &str = unsafe { std::str::from_utf8_unchecked(b"\xDF") };
-    let (temperature, humidity) = (m.temperature as f64 / 10.0, m.humidity as f64 / 10.0);
-    format!("{temperature:.1}{DEGREE_SYM}C | {humidity:.1}%")
-}
-
-fn format_nest_data(data: &nest::Data) -> String {
-    use nest::Data::*;
-    match data {
-        HeatCool {
-            heat_point,
-            temperature,
-            cool_point,
-        } => {
-            format!("{heat_point:.1}  {temperature:.1}  {cool_point:.1}")
+pub fn run_dht11<D>(tx: mpsc::Sender<DisplayUpdate>, mut dht11: Dht11, mut delay: D)
+where
+    D: DelayMs<u16> + DelayUs<u16>,
+{
+    loop {
+        trace!("Performing measurement");
+        match dht11.perform_measurement(&mut delay) {
+            Ok(measurement) => {
+                trace!("Displaying reading");
+                let output = format::measurement(&measurement);
+                let result = tx.send(DisplayUpdate::First(output));
+                // Kill thread when receiver disconnects
+                if result.is_err() {
+                    break;
+                }
+            }
+            Err(e) => info!("Failed to perform measurement: {e:?}"),
         }
-        Heat {
-            heat_point,
-            temperature,
-        } => {
-            format!("H:{heat_point:.1}{DEGREE_SYM}C T:{temperature:.1}{DEGREE_SYM}C")
-        }
-        Cool {
-            temperature,
-            cool_point,
-        } => {
-            format!("C:{cool_point:.1}{DEGREE_SYM}C T:{temperature:.1}{DEGREE_SYM}C")
-        }
-        Off { temperature } => {
-            format!("Temp: {temperature:.1}{DEGREE_SYM}C")
-        }
+        delay.delay_ms(500u16);
     }
 }
