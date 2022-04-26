@@ -17,26 +17,45 @@ pub mod nest;
 /// Display formatting helpers
 mod format;
 
+pub type Kill = ();
+
 pub enum DisplayUpdate {
     First(String),
     Second(String),
 }
 
-pub fn run_display<D>(rx: mpsc::Receiver<DisplayUpdate>, mut display: D)
+pub fn run_display<Display, Delay>(
+    display_rx: mpsc::Receiver<DisplayUpdate>,
+    kill_rx: mpsc::Receiver<Kill>,
+    mut display: Display,
+    mut delay: Delay,
+) -> Display
 where
-    D: TwoStringPrint,
+    Display: TwoStringPrint,
+    Delay: DelayMs<u16>,
 {
     use DisplayUpdate::*;
 
     let mut line1 = String::new();
     let mut line2 = String::new();
-    for update in rx.iter() {
-        match update {
-            First(s) => line1 = s,
-            Second(s) => line2 = s,
+    loop {
+        // Update display
+        for update in display_rx.try_iter() {
+            match update {
+                First(s) => line1 = s,
+                Second(s) => line2 = s,
+            }
+            display.print_two(&line1, &line2);
         }
-        display.print_two(&line1, &line2);
+
+        // Check for kill message
+        if let Ok(_) = kill_rx.try_recv() {
+            break;
+        }
+
+        delay.delay_ms(100u16);
     }
+    display
 }
 pub fn run_nest<D: DelayMs<u16>>(tx: mpsc::Sender<DisplayUpdate>, mut delay: D) {
     let nest = nest::Client::new();

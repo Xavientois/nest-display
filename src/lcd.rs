@@ -16,6 +16,11 @@ pub fn init(bus: u8, address: u16) -> Result<lcd::Display<Pcf8574>> {
     Ok(display)
 }
 
+/// Turn off the LCD display
+pub fn turn_off(display: lcd::Display<Pcf8574>) {
+    display.unwrap().backlight(false);
+}
+
 pub trait TwoStringPrint {
     fn print_two(&mut self, s1: &str, s2: &str);
 }
