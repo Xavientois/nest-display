@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::env;
 
 use anyhow::{anyhow, bail, Result};
 use reqwest::{blocking, header};
@@ -38,17 +39,15 @@ impl Client {
     }
 
     pub fn get_data(&self) -> Result<Data> {
-        const API_URI: &str = concat!(
-            "https://smartdevicemanagement.googleapis.com/v1/enterprises/",
-            env!("NEST_PROJECT_ID"),
-            "/devices/",
-            env!("NEST_DEVICE_ID")
-        );
+        let project_id = env::var("NEST_PROJECT_ID")?;
+        let nest_device_id = env::var("NEST_DEVICE_ID")?;
+        let api_uri = format!(
+            "https://smartdevicemanagement.googleapis.com/v1/enterprises/{project_id}/devices/{nest_device_id}");
 
         let client = blocking::Client::new();
         let traits = {
             let response: JsonValue = client
-                .get(API_URI)
+                .get(&api_uri)
                 .header(header::AUTHORIZATION, self.token()?)
                 .send()?
                 .json()?;
@@ -56,7 +55,7 @@ impl Client {
             // Try refreshing token if request fails
             if response.get("error").is_some() {
                 client
-                    .get(API_URI)
+                    .get(&api_uri)
                     .header(header::AUTHORIZATION, self.refresh_token()?)
                     .send()
                     .and_then(blocking::Response::error_for_status)?
@@ -82,18 +81,18 @@ impl Client {
     }
 
     fn refresh_token(&self) -> Result<Token> {
-        const API_URI: &str = "https://www.googleapis.com";
-        let url = format!("{API_URI}/oauth2/v4/token");
+        const URL: &str = "https://www.googleapis.com/oauth2/v4/token";
 
         let client = blocking::Client::new();
         let request = json!({
-            "client_id": env!("NEST_CLIENT_ID"),
-            "client_secret": env!("NEST_CLIENT_SECRET"),
-            "refresh_token": env!("NEST_REFRESH_TOKEN"),
+            "client_id": env::var("NEST_CLIENT_ID")?,
+            "client_secret": env::var("NEST_CLIENT_SECRET")?,
+            "refresh_token": env::var("NEST_REFRESH_TOKEN")?,
             "grant_type": "refresh_token"
         });
+        println!("{request}");
         let response: JsonValue = client
-            .post(url)
+            .post(URL)
             .json(&request)
             .send()
             .and_then(blocking::Response::error_for_status)?
